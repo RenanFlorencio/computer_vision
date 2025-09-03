@@ -8,12 +8,6 @@
 
 O objetivo deste trabalho é aplicar conceitos de Visão Computacional para criar panoramas a partir de múltiplas imagens. O projeto visa desenvolver competências práticas em detecção de características, emparelhamento, estimação de homografia e *blending*.
 
-## Entregáveis
-
-1.  Um relatório técnico completo de até seis páginas em PDF.
-2.  Panoramas gerados automaticamente que deverão ser apresentados em aula.
-3.  Uma apresentação oral de 20 a 25 minutos com slides e um vídeo de 10 minutos demonstrando a técnica.
-
 ## Etapas do Trabalho
 
 ### Etapa 1: Coleta das Imagens 
@@ -49,5 +43,10 @@ Emparelhamento e Alinhmaento das imagens:
 
 <img src=output/morfologia/panorama_morfologia.jpg />
 
-Composição e *Blending*
+Composição e *Blending*:
+
 <img src=output/final/panorama_final.jpg />
+
+### Report
+
+For further details, check ``report.pdf``.
