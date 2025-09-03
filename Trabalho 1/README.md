@@ -43,17 +43,11 @@ O objetivo deste trabalho é aplicar conceitos de Visão Computacional para cria
 * Aplicar *blending* para suavizar as transições (por exemplo: *feathering*, linear, *multiband*).
 * Avaliar visualmente e com métricas simples, como a continuidade de linhas e a ausência de distorções.
 
-## Critérios de Avaliação
+### Resultado Final
 
-| Critério | Peso |
-| :--- | :--- |
-| Qualidade técnica do panorama | 30% |
-| Clareza e profundidade do relatório e apresentação | 20% |
-| Participação equilibrada e apresentação | 30% |
-| Criatividade ou desafios enfrentados | 20% |
+Emparelhamento e Alinhmaento das imagens:
 
-## Extras (opcional)
+<img src=output/morfologia/panorama_morfologia.jpg />
 
-* Remoção de fantasmas (*ghosting*).
-* Detecção automática da ordem correta das imagens.
-* Geração de panorama $360^{\circ}$ (caso as imagens permitam).
+Composição e *Blending*
+<img src=output/final/panorama_final.jpg />
