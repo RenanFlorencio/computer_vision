@@ -7,11 +7,13 @@ from skimage.measure import find_contours
 import matplotlib.pyplot as plt
 
 BASE_PATH = "./Trabalho 2/fotos/"
-CENARIO = "boneco2"  # Altere para o cenário desejado
+CENARIO = "boneco-compressed"  # Altere para o cenário desejado
 IMAGES_PATH = BASE_PATH + CENARIO + "/"
-OUTPUT_PATH =  f"./Trabalho 2/seg_fotos/{CENARIO}/"
+OUTPUT_SEG_PATH =  f"./Trabalho 2/seg_fotos/{CENARIO}/"
+OUTPUT_MASK_PATH =  f"./Trabalho 2/mask_fotos/{CENARIO}/"
 
-os.makedirs(OUTPUT_PATH, exist_ok=True)
+os.makedirs(OUTPUT_SEG_PATH, exist_ok=True)
+os.makedirs(OUTPUT_MASK_PATH, exist_ok=True)
 
 # def green_superpixel_mask(img, segments):
 #     '''Cria uma máscara booleana onde True indica superpixels verdes'''
@@ -51,6 +53,12 @@ def segmentate(img):
         binary = g_mask
     return binary
 
+def close_holes(binary):
+    ''' Fecha buracos na máscara binária usando morfologia matemática '''
+    kernel = np.ones((5, 5), np.uint8)
+    closed = cv2.morphologyEx(binary.astype('uint8'), cv2.MORPH_CLOSE, kernel, iterations=3)
+    return closed
+
 def background_removal(img, binary):
     ''' Remove o fundo da imagem usando a máscara binária '''
     iterations = 20
@@ -69,7 +77,8 @@ for name in image_names:
     img = io.imread(IMAGES_PATH + name)
     binary = segmentate(img)
     result = background_removal(img, binary)
-    io.imsave(OUTPUT_PATH + name, result)
+    io.imsave(OUTPUT_MASK_PATH + name, close_holes(binary).astype('uint8') * 255)
+    io.imsave(OUTPUT_SEG_PATH + name, result)
 
 # # Processa uma imagem específica e exibe os resultados
 # # IMAGE_PATH = "./Trabalho 2/fotos/cenario4-vaso/IMG_0505.jpeg"
