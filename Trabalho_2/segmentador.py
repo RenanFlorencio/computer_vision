@@ -6,11 +6,11 @@ import cv2
 from skimage.measure import find_contours
 import matplotlib.pyplot as plt
 
-BASE_PATH = "./Trabalho 2/fotos/"
+BASE_PATH = "./Trabalho_2/fotos/"
 CENARIO = "boneco-compressed"  # Altere para o cenário desejado
 IMAGES_PATH = BASE_PATH + CENARIO + "/"
-OUTPUT_SEG_PATH =  f"./Trabalho 2/seg_fotos/{CENARIO}/"
-OUTPUT_MASK_PATH =  f"./Trabalho 2/mask_fotos/{CENARIO}/"
+OUTPUT_SEG_PATH =  f"./Trabalho_2/seg_fotos/{CENARIO}/"
+OUTPUT_MASK_PATH =  f"./Trabalho_2/mask_fotos/{CENARIO}/"
 
 os.makedirs(OUTPUT_SEG_PATH, exist_ok=True)
 os.makedirs(OUTPUT_MASK_PATH, exist_ok=True)

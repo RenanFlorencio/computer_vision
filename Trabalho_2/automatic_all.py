@@ -6,7 +6,7 @@ import os
 for prefix in ["", "seg_"]:
     PREFIX = prefix
     
-    BASE_PATH = f"./Trabalho 2/{PREFIX}fotos/"
+    BASE_PATH = f"./Trabalho_2/{PREFIX}fotos/"
     if not os.path.exists(BASE_PATH):
         BASE_PATH = f"./{PREFIX}fotos/"
     

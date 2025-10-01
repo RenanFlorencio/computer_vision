@@ -46,7 +46,8 @@ def background_removal(img, binary):
     mask = binary2.astype('uint8') * 255
     result = cv2.bitwise_and(img, img, mask=mask)
     return result
-BASE_DIR = "./Trabalho 2"
+
+BASE_DIR = "./Trabalho_2"
 if not os.path.exists(BASE_DIR):
     BASE_DIR = "."
 print(f"Using base dir: {BASE_DIR}")
