@@ -9,8 +9,8 @@ O run.sh roda apenas o pipeline do COLMAP. Para gerar os resultados intermediár
 
 ## Como rodar 
 
-A implementação utiliza OpenCV e COLMAP. Portanto, é necessário possuir ambos instalados. Para rodar, basta clonar o repositório e, após instalar as ferramentas, rodar os seguintes comandos:
+A implementação utiliza Open3d, OpenCV e COLMAP. Portanto, é necessário possuir todos instalados. Para rodar, basta clonar o repositório e, após instalar as ferramentas, rodar os seguintes comandos:
 
-```cd Trabalho 2```
+```cd Trabalho_2```
 ```chmod +x run.sh```
 ```./run.sh```
