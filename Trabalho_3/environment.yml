@@ -1,0 +1,70 @@
+# ============================================================================
+# Ambiente Conda: nav-assistida
+# Sistema de Navegação Assistida por Visão Computacional
+# ============================================================================
+
+name: nav-assistida
+
+channels:
+  - defaults
+  - conda-forge
+
+dependencies:
+  # ============================================================================
+  # Python
+  # ============================================================================
+  - python=3.10.*
+
+  # ============================================================================
+  # Pacotes Base (conda)
+  # ============================================================================
+  - numpy=1.26.*
+  - opencv=4.10.*
+  - pillow=10.*
+  - matplotlib=3.8.*
+
+  # ============================================================================
+  # Utilitários
+  # ============================================================================
+  - pip=24.*
+
+  # ============================================================================
+  # Pacotes via pip (PyTorch DEVE ser pip no Arch Linux)
+  # ============================================================================
+  - pip:
+      # Deep Learning - PyTorch com CUDA
+      # IMPORTANTE: Usar pip para garantir versão CUDA
+      - torch==2.5.1
+      - torchvision==0.20.1
+      - --index-url https://download.pytorch.org/whl/cu118
+      
+      # YOLO e Modelos
+      - ultralytics>=8.0.0
+      - timm>=1.0.0
+      
+      # Text-to-Speech
+      - pyttsx3>=2.90
+      
+      # Utilitários
+      - tqdm>=4.66.0
+
+# ============================================================================
+# Notas de Instalação
+# ============================================================================
+# 
+# Criar ambiente:
+#   conda env create -f environment.yml
+#
+# Ativar:
+#   conda activate nav-assistida
+#
+# Atualizar:
+#   conda env update -f environment.yml --prune
+#
+# Exportar (para backup):
+#   conda env export --no-builds > environment.yml
+#
+# Remover:
+#   conda env remove -n nav-assistida
+#
+# ============================================================================
