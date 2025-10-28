@@ -8,8 +8,11 @@ import subprocess
 from tts import tts
 import requests
 
-FRAME_INTERVAL_DEPTH = 20  # Depth every N frames
+TARGET_FPS = 30
+FRAME_DURATION = 1.0 / TARGET_FPS
+FRAME_INTERVAL_DEPTH = 10  # Depth every N frames
 TTS_COOLDOWN_TIME = 5  # Cooldown time (seconds) between TTS warnings
+IP_CELULAR_TAILSCALE = "100.118.7.80"
 
 
 def get_center_distance(det, depth_map, estimator):
@@ -48,20 +51,23 @@ def make_warning(distance, obj_name, position):
 
 def make_warning_phone(distance, obj_name, position):
 
-    proximity = "próximo" if (distance < 1.5) else "distante"
+    proximity = "próximo" if (distance < 2.1) else "distante"
 
     audio_path = os.path.join(
         os.path.dirname(__file__),
         f"tts/audios/{obj_name}_{position}_{proximity}.wav"
     )
 
-    if not os.path.exists(audio_path):
-        text = f"Atenção! {obj_name} {proximity} à {position}."
-        tts.synthesize_speech(text, audio_path)
+    if (proximity == "próximo"):
+        print("Enviando aviso de perigo para o telefone...")
+        if not os.path.exists(audio_path):
+            print("Síntese de áudio não encontrada. Sintetizando novo áudio...")
+            text = f"{obj_name} {proximity} à {position}."
+            tts.synthesize_speech(text, audio_path)
 
-    with open(audio_path, 'rb') as f:
-        requests.post(f"http://100.118.7.80:5000/play_audio",
-                      files={"audio": f})
+        with open(audio_path, 'rb') as f:
+            requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio",
+                          files={"audio": f})
 
 
 if __name__ == "__main__":
@@ -77,7 +83,7 @@ if __name__ == "__main__":
         estimator.alpha = 0.35  # smoothing filter
 
         # Conection through RTSP
-        phone_url = "rtsp://100.118.7.80:8080/h264_ulaw.sdp"
+        phone_url = f"rtsp://{IP_CELULAR_TAILSCALE}:8080/h264_ulaw.sdp"
         cap = cv2.VideoCapture(phone_url)
 
         # cap = cv2.VideoCapture(0)
@@ -97,6 +103,7 @@ if __name__ == "__main__":
         danger = False
 
         while True:
+
             ret, frame = cap.read()
             if not ret:
                 continue
