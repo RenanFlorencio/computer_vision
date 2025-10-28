@@ -34,9 +34,8 @@ dependencies:
   - pip:
       # Deep Learning - PyTorch com CUDA
       # IMPORTANTE: Usar pip para garantir versão CUDA
-      - torch==2.5.1
-      - torchvision==0.20.1
-      - --index-url https://download.pytorch.org/whl/cu118
+      - torch==2.5.1 --index-url https://download.pytorch.org/whl/cu118
+      - torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu118
       
       # YOLO e Modelos
       - ultralytics>=8.0.0
