@@ -6,6 +6,7 @@ from detector import ObjectDetector
 from depth import DepthEstimator
 import subprocess
 from tts import tts
+import requests
 
 FRAME_INTERVAL_DEPTH = 20  # Depth every N frames
 TTS_COOLDOWN_TIME = 5  # Cooldown time (seconds) between TTS warnings
@@ -23,9 +24,9 @@ def get_center_distance(det, depth_map, estimator):
     return estimator.get_distance_at_point(depth_map, cx, cy, use_buffer=True)
 
 
-def make_warning(obj_name, position):
+def make_warning(distance, obj_name, position):
 
-    proximity = "próximo" if (distance < 0.8) else "distante"
+    proximity = "próximo" if (distance < 1.5) else "distante"
 
     print(f"⚠️ Aviso TTS: {obj_name} {proximity} à {position}")
     audio_path = os.path.join(
@@ -45,6 +46,24 @@ def make_warning(obj_name, position):
     ])
 
 
+def make_warning_phone(distance, obj_name, position):
+
+    proximity = "próximo" if (distance < 1.5) else "distante"
+
+    audio_path = os.path.join(
+        os.path.dirname(__file__),
+        f"tts/audios/{obj_name}_{position}_{proximity}.wav"
+    )
+
+    if not os.path.exists(audio_path):
+        text = f"Atenção! {obj_name} {proximity} à {position}."
+        tts.synthesize_speech(text, audio_path)
+
+    with open(audio_path, 'rb') as f:
+        requests.post(f"http://100.118.7.80:5000/play_audio",
+                      files={"audio": f})
+
+
 if __name__ == "__main__":
 
     print("=" * 70)
@@ -57,7 +76,16 @@ if __name__ == "__main__":
         estimator = DepthEstimator(temporal_filter='exponential')
         estimator.alpha = 0.35  # smoothing filter
 
-        cap = cv2.VideoCapture(0)
+        # Conection through RTSP
+        phone_url = "rtsp://100.118.7.80:8080/h264_ulaw.sdp"
+        cap = cv2.VideoCapture(phone_url)
+
+        # cap = cv2.VideoCapture(0)
+
+        # Conection through IP camera
+        # phone_url = "http://192.168.0.117:8080/video"
+        # cap = cv2.VideoCapture(phone_url)
+
         if not cap.isOpened():
             raise Exception("❌ Camera not available!")
 
@@ -81,6 +109,8 @@ if __name__ == "__main__":
                 last_depth_map = estimator.estimate(frame)
 
             frame_out = frame.copy()
+            # [distance, name, cx]
+            min_distance = {"dist": float('inf'), "name": "", "cx": 0}
 
             for det in detections:
                 # Bounding box
@@ -94,18 +124,13 @@ if __name__ == "__main__":
                     distance = estimator.get_distance_at_point(
                         last_depth_map, cx, cy, use_buffer=True
                     )
+                    # Update minimum distance
+                    if distance and distance < min_distance["dist"]:
+                        min_distance["dist"] = distance
+                        min_distance["name"] = det['name_pt']
+                        min_distance["cx"] = cx
+
                     distance_txt = f"{distance:.2f}m" if distance else "..."
-
-                    if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
-
-                        h, w, _ = frame.shape
-
-                        position = "esquerda" if (
-                            cx > w * 0.66) else "direita" if (cx < w * 0.33) else "frente"
-
-                        make_warning(det['name_pt'], position)
-
-                        last_warning_time = time.time()
 
                 else:
                     distance_txt = "..."
@@ -119,6 +144,16 @@ if __name__ == "__main__":
                 cv2.putText(frame_out, text, (x1, y1 - 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                             (0, 255, 0), 2)
+
+            if min_distance["dist"] != float('inf') and time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+
+                h, w, _ = frame.shape
+                position = "direita" if (
+                    min_distance["cx"] > w * 0.66) else "esquerda" if (min_distance["cx"] < w * 0.33) else "frente"
+
+                make_warning_phone(
+                    min_distance["dist"], min_distance["name"], position)
+                last_warning_time = time.time()
 
             frame_counter += 1
 
