@@ -11,81 +11,64 @@ from threading import Thread
 import queue
 
 # --- CONFIGURATION ---
-FRAME_INTERVAL_DEPTH = 1        # depth thread can skip frames internally if needed
+DETECTION_INTERVAL = 10          # Run YOLO every N frames
 TTS_COOLDOWN_TIME = 5           # seconds between TTS warnings
 TARGET_FPS = 30
 FRAME_DURATION = 1.0 / TARGET_FPS
+DEPTH_SMOOTH_WINDOW = 5         # number of frames for depth smoothing
+IP_CELULAR_TAILSCALE = "100.118.7.80"
 
 # --- SHARED DATA ---
-frame_queue = queue.Queue(maxsize=1)  # queue for depth estimation
-# latest depth map (updated by depth thread)
+frame_queue = queue.Queue(maxsize=1)
 depth_map = None
 
+# Depth smoothing per object ID
+depth_history = {}  # {obj_id: [distances]}
 
-# --- DEPTH WORKER THREAD ---
+# --- DEPTH THREAD ---
+
+
 def depth_worker(estimator, frame_queue):
     global depth_map
     while True:
-        frame = frame_queue.get()  # wait for new frame
+        frame = frame_queue.get()
         if frame is not None:
             depth_map = estimator.estimate(frame)
         frame_queue.task_done()
 
 
-# --- TTS / WARNING FUNCTIONS ---
-def make_warning(distance, obj_name, position):
-    proximity = "próximo" if distance < 1.5 else "distante"
-    print(f"⚠️ Aviso TTS: {obj_name} {proximity} à {position}")
-
-    audio_path = os.path.join(
-        os.path.dirname(
-            __file__), f"tts/audios/{obj_name}_{position}_{proximity}.wav"
-    )
-
-    if not os.path.exists(audio_path):
-        tts.synthesize_speech(
-            f"Atenção! {obj_name} {proximity} à {position}.", audio_path
-        )
-
-    subprocess.Popen(["aplay", audio_path])
-
-
+# --- TTS FUNCTIONS ---
 def make_warning_phone(distance, obj_name, position):
     proximity = "próximo" if distance < 1.5 else "distante"
-
     audio_path = os.path.join(
         os.path.dirname(
             __file__), f"tts/audios/{obj_name}_{position}_{proximity}.wav"
     )
-
     if not os.path.exists(audio_path):
-        text = f"Atenção! {obj_name} {proximity} à {position}."
-        tts.synthesize_speech(text, audio_path)
+        tts.synthesize_speech(
+            f"{obj_name} {proximity} à {position}.", audio_path)
 
     with open(audio_path, "rb") as f:
-        requests.post("http://100.118.7.80:5000/play_audio",
+        requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio",
                       files={"audio": f})
 
 
 # --- MAIN SCRIPT ---
 if __name__ == "__main__":
     print("=" * 70)
-    print("MERGED SYSTEM - OBJECT DETECTION + DEPTH ESTIMATION (MiDaS)")
+    print("NAVIGATION SYSTEM - DETECTION + TRACKING + DEPTH")
     print("=" * 70)
 
     try:
-        # Initialize detectors
         detector = ObjectDetector()
         estimator = DepthEstimator(temporal_filter='exponential')
         estimator.alpha = 0.35
 
-        # Camera setup (RTSP)
-        phone_url = "rtsp://100.118.7.80:8080/h264_ulaw.sdp"
+        # Camera
+        phone_url = f"rtsp://{IP_CELULAR_TAILSCALE}:8080/h264_ulaw.sdp"
         cap = cv2.VideoCapture(phone_url)
         if not cap.isOpened():
             raise Exception("❌ Camera not available!")
-
-        print("\n🎥 Running system (ESC to exit)")
 
         # Start depth thread
         depth_thread = Thread(target=depth_worker,
@@ -93,77 +76,79 @@ if __name__ == "__main__":
         depth_thread.daemon = True
         depth_thread.start()
 
-        frame_counter = 0
         last_warning_time = 0
+        frame_counter = 0
 
         while True:
             loop_start = time.time()
-
             ret, frame = cap.read()
             if not ret:
                 continue
 
-            # --- Object detection ---
-            detections = detector.detect(frame)
-
-            # --- Push frame to depth queue ---
+            # Push frame to depth queue
             try:
-                # drop frame if queue is full
                 frame_queue.put_nowait(frame.copy())
             except queue.Full:
                 pass
 
             frame_out = frame.copy()
-            min_distance = {"dist": float("inf"), "name": "", "cx": 0}
 
-            for det in detections:
-                x1, y1, x2, y2 = [int(v) for v in det['bbox']]
-                cv2.rectangle(frame_out, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # --- Detection every N frames ---
+            if frame_counter % DETECTION_INTERVAL == 0 or len(detector.prev_objects) == 0:
+                detections = detector.detect(frame)
+                detector.initialize_tracking(frame, detections)
 
-                # Use latest depth map
-                distance_txt = "..."
-                if depth_map is not None:
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+            else:
+                detector.update_tracking(frame)
+
+            # --- Process tracked objects ---
+            if detector.prev_objects and depth_map is not None:
+                for obj_id, obj in detector.prev_objects.items():
+                    x1, y1, x2, y2 = obj['bbox']
+                    cx, cy = obj['center']
+                    obj_name = obj['name_pt']
+
+                    # Depth smoothing
                     distance = estimator.get_distance_at_point(
                         depth_map, cx, cy, use_buffer=True)
-                    if distance and distance < min_distance["dist"]:
-                        min_distance["dist"] = distance
-                        min_distance["name"] = det['name_pt']
-                        min_distance["cx"] = cx
-                    distance_txt = f"{distance:.2f}m" if distance else "..."
+                    if distance is not None:
+                        depth_history.setdefault(obj_id, [])
+                        depth_history[obj_id].append(distance)
+                        depth_history[obj_id] = depth_history[obj_id][-DEPTH_SMOOTH_WINDOW:]
+                        smoothed_distance = sum(
+                            depth_history[obj_id]) / len(depth_history[obj_id])
+                    else:
+                        smoothed_distance = None
 
-                conf = det.get('confidence', 0)
-                label = det.get('name_pt', 'objeto')
-                text = f"{label}: {conf:.2f} | {distance_txt}"
-                cv2.putText(frame_out, text, (x1, y1 - 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+                    # Draw bbox + distance
+                    cv2.rectangle(frame_out, (x1, y1),
+                                  (x2, y2), (0, 255, 0), 2)
+                    distance_text = f"{smoothed_distance:.2f}m" if smoothed_distance else "..."
+                    label = f"{obj_name} | {distance_text}"
+                    cv2.putText(frame_out, label, (x1, y1 - 8),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
 
-            # --- TTS Warning ---
-            if min_distance["dist"] != float("inf") and (time.time() - last_warning_time > TTS_COOLDOWN_TIME):
-                h, w, _ = frame.shape
-                pos = "direita" if min_distance["cx"] > w * \
-                    0.66 else "esquerda" if min_distance["cx"] < w * 0.33 else "frente"
-                make_warning_phone(
-                    min_distance["dist"], min_distance["name"], pos)
-                last_warning_time = time.time()
+                    # TTS warning
+                    if (smoothed_distance is not None and smoothed_distance < 1.5 and
+                            time.time() - last_warning_time > TTS_COOLDOWN_TIME):
+                        h, w, _ = frame.shape
+                        pos = "direita" if cx > w * 0.66 else "esquerda" if cx < w * 0.33 else "frente"
+                        make_warning_phone(smoothed_distance, obj_name, pos)
+                        last_warning_time = time.time()
 
-            frame_counter += 1
-
-            # --- FPS ---
+            # FPS limiter & display
             elapsed = time.time() - loop_start
             fps = 1.0 / max(elapsed, 1e-6)
             cv2.putText(frame_out, f"FPS: {fps:.1f}", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-            # --- Display ---
-            cv2.imshow("Detector + Depth (ESC = exit)", frame_out)
+            cv2.imshow("Navigation System (ESC=exit)", frame_out)
             if cv2.waitKey(1) & 0xFF == 27:
                 break
 
-            # --- FPS limiter ---
             sleep_time = FRAME_DURATION - (time.time() - loop_start)
             if sleep_time > 0:
                 time.sleep(sleep_time)
+            frame_counter += 1
 
         cap.release()
         cv2.destroyAllWindows()

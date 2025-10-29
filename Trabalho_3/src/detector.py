@@ -118,7 +118,13 @@ class ObjectDetector:
         # Métricas
         self.inference_times = []
 
-    def detect(self, frame, filter_classes=True):
+        # --- ORB tracking ---
+        self.orb = cv2.ORB_create(nfeatures=500)
+        self.prev_objects = {}  # {obj_id: {'bbox': (), 'kp': [], 'des': [], 'name_pt': str}}
+        self.next_id = 0
+        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+    def detect(self, frame, filter_classes=True, use_tracking=True):
         """
         Detectar objetos no frame
 
@@ -180,6 +186,39 @@ class ObjectDetector:
             })
 
         return detections
+
+    # --- ORB Tracking helpers ---
+    def initialize_tracking(self, frame, detections):
+        """Initialize trackers from detections"""
+        self.prev_objects = {}
+        self.next_id = 0
+        for det in detections:
+            x1, y1, x2, y2 = map(int, det['bbox'])
+            roi = frame[y1:y2, x1:x2]
+            kp, des = self.orb.detectAndCompute(roi, None)
+            self.prev_objects[self.next_id] = {'bbox': (x1, y1, x2, y2),
+                                               'kp': kp, 'des': des,
+                                               'name_pt': det['name_pt'],
+                                               'center': det['center']}
+            self.next_id += 1
+
+    def update_tracking(self, frame):
+        """Update tracked objects using ORB matching"""
+        new_objects = {}
+        for obj_id, obj in self.prev_objects.items():
+            x1, y1, x2, y2 = obj['bbox']
+            roi = frame[y1:y2, x1:x2]
+            kp, des = self.orb.detectAndCompute(roi, None)
+            if des is None or obj['des'] is None:
+                continue
+            matches = self.bf.match(obj['des'], des)
+            if len(matches) > 5:  # sufficient matches
+                cx, cy = x1 + (x2 - x1)//2, y1 + (y2 - y1)//2
+                new_objects[obj_id] = {'bbox': (x1, y1, x2, y2),
+                                       'kp': kp, 'des': des,
+                                       'name_pt': obj['name_pt'],
+                                       'center': (cx, cy)}
+        self.prev_objects = new_objects
 
     def draw_detections(self, frame, detections, show_conf=True, color=(0, 255, 0)):
         """
