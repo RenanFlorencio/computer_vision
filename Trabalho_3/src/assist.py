@@ -5,7 +5,6 @@ import time
 from detector import ObjectDetector
 from depth import DepthEstimator
 from tts import tts
-import subprocess
 import requests
 from threading import Thread
 import queue
@@ -94,16 +93,11 @@ if __name__ == "__main__":
             frame_out = frame.copy()
 
             # --- Detection every N frames ---
-            if frame_counter % DETECTION_INTERVAL == 0 or len(detector.prev_objects) == 0:
-                detections = detector.detect(frame)
-                detector.initialize_tracking(frame, detections)
-
-            else:
-                detector.update_tracking(frame)
+            tracked_objects = detector.detect_and_track(frame)
 
             # --- Process tracked objects ---
-            if detector.prev_objects and depth_map is not None:
-                for obj_id, obj in detector.prev_objects.items():
+            if tracked_objects and depth_map is not None:
+                for obj in tracked_objects:
                     x1, y1, x2, y2 = obj['bbox']
                     cx, cy = obj['center']
                     obj_name = obj['name_pt']
@@ -111,12 +105,14 @@ if __name__ == "__main__":
                     # Depth smoothing
                     distance = estimator.get_distance_at_point(
                         depth_map, cx, cy, use_buffer=True)
+
                     if distance is not None:
-                        depth_history.setdefault(obj_id, [])
-                        depth_history[obj_id].append(distance)
-                        depth_history[obj_id] = depth_history[obj_id][-DEPTH_SMOOTH_WINDOW:]
+                        depth_history.setdefault(obj['id'], [])
+                        depth_history[obj['id']].append(distance)
+                        depth_history[obj['id']
+                                      ] = depth_history[obj['id']][-DEPTH_SMOOTH_WINDOW:]
                         smoothed_distance = sum(
-                            depth_history[obj_id]) / len(depth_history[obj_id])
+                            depth_history[obj['id']]) / len(depth_history[obj['id']])
                     else:
                         smoothed_distance = None
 

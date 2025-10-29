@@ -6,6 +6,7 @@ Projeto: Navegação Assistida por Visão Computacional
 
 import torch
 from ultralytics import YOLO
+from ultralytics.cfg import get_cfg
 import numpy as np
 import cv2
 import time
@@ -50,9 +51,6 @@ class ObjectDetector:
         60: 'dining table',
         62: 'tv',
         63: 'laptop',
-        64: 'mouse',
-        65: 'remote',
-        66: 'keyboard',
         67: 'cell phone',
     }
 
@@ -104,8 +102,8 @@ class ObjectDetector:
         print(f"   Device: {self.device.upper()}")
         print(f"   Precision: {'FP16' if self.half else 'FP32'}")
 
-        # Carregar modelo
         self.model = YOLO(model)
+        self.model.to(self.device)
 
         # Warm-up com dummy image
         print(f"   Aquecendo GPU...")
@@ -117,108 +115,64 @@ class ObjectDetector:
 
         # Métricas
         self.inference_times = []
+        self.track_history = {}
 
-        # --- ORB tracking ---
-        self.orb = cv2.ORB_create(nfeatures=500)
-        self.prev_objects = {}  # {obj_id: {'bbox': (), 'kp': [], 'des': [], 'name_pt': str}}
-        self.next_id = 0
-        self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-
-    def detect(self, frame, filter_classes=True, use_tracking=True):
+    def detect_and_track(self, frame):
         """
-        Detectar objetos no frame
-
-        Args:
-            frame: Frame BGR (numpy array)
-            filter_classes: Filtrar apenas classes relevantes
-
-        Returns:
-            list: Lista de detecções [{class_id, name, name_pt, conf, bbox, center}]
+        Run YOLOv8 inference + ByteTrack tracking
+        Returns list of tracked objects with ID
         """
         start = time.time()
 
-        # Inferência
-        results = self.model(
+        results = self.model.track(
             frame,
             conf=self.conf,
             iou=self.iou,
-            verbose=False,
+            persist=True,
             device=self.device,
-            half=self.half
+            half=self.half,
+            verbose=False
         )
 
-        # Medir tempo
         inf_time = (time.time() - start) * 1000
         self.inference_times.append(inf_time)
         if len(self.inference_times) > 100:
             self.inference_times.pop(0)
 
-        # Extrair detecções
-        detections = []
-        for box in results[0].boxes:
-            class_id = int(box.cls[0])
+        tracked = []
+        r = results[0]
 
-            # Filtrar se necessário
-            if filter_classes and class_id not in self.NAVIGATION_CLASSES:
+        if not hasattr(r, "boxes") or r.boxes is None:
+            return tracked
+
+        for box in r.boxes:
+            class_id = int(box.cls[0])
+            if class_id not in self.NAVIGATION_CLASSES:
                 continue
 
-            confidence = float(box.conf[0])
-            bbox = box.xyxy[0].cpu().numpy()  # [x1, y1, x2, y2]
+            track_id = int(box.id[0]) if box.id is not None else None
+            if track_id is None:
+                continue  # We ignore untracked objects
 
-            # Centro do bbox
-            center_x = int((bbox[0] + bbox[2]) / 2)
-            center_y = int((bbox[1] + bbox[3]) / 2)
+            bbox = box.xyxy[0].cpu().numpy().astype(int)
+            x1, y1, x2, y2 = bbox
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
 
-            # Nome da classe
-            class_name = self.model.names[class_id]
-            class_name_pt = self.TRANSLATIONS.get(class_name, class_name)
+            name = self.model.names[class_id]
+            name_pt = self.TRANSLATIONS.get(name, name)
 
-            detections.append({
+            tracked.append({
+                'id': track_id,
                 'class_id': class_id,
-                'name': class_name,
-                'name_pt': class_name_pt,
-                'confidence': confidence,
-                'bbox': bbox,
-                'center': (center_x, center_y),
-                'width': bbox[2] - bbox[0],
-                'height': bbox[3] - bbox[1],
-                'area': (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                'name': name,
+                'name_pt': name_pt,
+                'confidence': float(box.conf[0]),
+                'bbox': (x1, y1, x2, y2),
+                'center': (cx, cy)
             })
 
-        return detections
-
-    # --- ORB Tracking helpers ---
-    def initialize_tracking(self, frame, detections):
-        """Initialize trackers from detections"""
-        self.prev_objects = {}
-        self.next_id = 0
-        for det in detections:
-            x1, y1, x2, y2 = map(int, det['bbox'])
-            roi = frame[y1:y2, x1:x2]
-            kp, des = self.orb.detectAndCompute(roi, None)
-            self.prev_objects[self.next_id] = {'bbox': (x1, y1, x2, y2),
-                                               'kp': kp, 'des': des,
-                                               'name_pt': det['name_pt'],
-                                               'center': det['center']}
-            self.next_id += 1
-
-    def update_tracking(self, frame):
-        """Update tracked objects using ORB matching"""
-        new_objects = {}
-        for obj_id, obj in self.prev_objects.items():
-            x1, y1, x2, y2 = obj['bbox']
-            roi = frame[y1:y2, x1:x2]
-            kp, des = self.orb.detectAndCompute(roi, None)
-            if des is None or obj['des'] is None:
-                continue
-            matches = self.bf.match(obj['des'], des)
-            if len(matches) > 5:  # sufficient matches
-                cx, cy = x1 + (x2 - x1)//2, y1 + (y2 - y1)//2
-                new_objects[obj_id] = {'bbox': (x1, y1, x2, y2),
-                                       'kp': kp, 'des': des,
-                                       'name_pt': obj['name_pt'],
-                                       'center': (cx, cy)}
-        self.prev_objects = new_objects
+        return tracked
 
     def draw_detections(self, frame, detections, show_conf=True, color=(0, 255, 0)):
         """
