@@ -14,7 +14,8 @@ DETECTION_INTERVAL = 10          # Run YOLO every N frames
 TTS_COOLDOWN_TIME = 5           # seconds between TTS warnings
 TARGET_FPS = 30
 FRAME_DURATION = 1.0 / TARGET_FPS
-DEPTH_SMOOTH_WINDOW = 5         # number of frames for depth smoothing
+DEPTH_SMOOTH_WINDOW = 10         # number of frames for depth smoothing
+SCORE_WINDOW = 10                # number of frames for score smoothing
 IP_CELULAR_TAILSCALE = "100.118.7.80"
 PORTA_DROIDCAM = "4747"
 
@@ -33,6 +34,7 @@ latest_frame = {"frame": None, "lock": Lock(), "stopped": False}
 
 # Depth smoothing per object ID
 depth_history = {}  # {obj_id: [distances]}
+score_history = {}  # {obj_id: [scores]}
 
 # --- DEPTH THREAD ---
 
@@ -72,8 +74,10 @@ def relevance_monitor():
                 h, w, _ = obj["frame_shape"]
                 cx = obj["cx"]
                 pos = "direita" if cx > w * 0.66 else "esquerda" if cx < w * 0.33 else "frente"
+                proximity = "perto" if obj["distance"] < 1.5 else "longe" if obj["distance"] < 2.5 else "distante"
 
-                make_warning_phone(obj["distance"], obj["name"], pos)
+                make_warning_phone(
+                    obj["distance"], obj["name"], pos, proximity)
                 last_warned_object_id = obj["id"]
                 last_warned_score = highest_score
                 last_warning_time = time.time()
@@ -93,8 +97,7 @@ def frame_reader(cap, latest_frame):
 
 
 # --- TTS FUNCTIONS ---
-def make_warning_phone(distance, obj_name, position):
-    proximity = "próximo" if distance < 1.5 else "distante"
+def make_warning_phone(distance, obj_name, position, proximity):
     audio_path = os.path.join(
         os.path.dirname(
             __file__), f"tts/audios/{obj_name}_{position}_{proximity}.wav"
@@ -106,6 +109,29 @@ def make_warning_phone(distance, obj_name, position):
     with open(audio_path, "rb") as f:
         requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio",
                       files={"audio": f})
+
+
+def calculate_score(obj_id, distance, bbox_area, object_name, center, frame_width):
+    """Calculate relevance score."""
+    current_score = (1.0 / (distance + 1e-3)) + 0.001 * bbox_area  # base score
+
+    score_history.setdefault(obj_id, [])
+    score_history[obj_id].append(current_score)
+    # keep last SCORE_WINDOW frames
+    score_history[obj_id] = score_history[obj_id][-SCORE_WINDOW:]
+
+    smoothed_score = sum(score_history[obj_id]) / len(score_history[obj_id])
+
+    if distance <= 0.6:
+        smoothed_score += 5.0  # high bonus for very close objects
+
+    if center[0] < frame_width * 0.33 or center[0] > frame_width * 0.66:
+        smoothed_score *= 0.8  # penalize objects far from center
+
+    if object_name in ["pessoa", "mesa", "cama", "cadeira", "sofá"]:
+        smoothed_score *= 1.5  # prioritize certain objects
+
+    return smoothed_score
 
 
 # --- MAIN SCRIPT ---
@@ -175,6 +201,7 @@ if __name__ == "__main__":
             if tracked_objects and depth_map is not None:
                 highest_score = -float('inf')
                 most_relevant_obj = None
+                processed_objects = []
 
                 for obj in tracked_objects:
                     x1, y1, x2, y2 = obj['bbox']
@@ -194,29 +221,37 @@ if __name__ == "__main__":
                         depth_history[obj['id']]) / len(depth_history[obj['id']])
 
                     bbox_area = (x2 - x1) * (y2 - y1)
-                    score = (1.0 / (smoothed_distance + 1e-3)) + \
-                        0.001 * bbox_area
+                    center = (cx, cy)
+                    score = calculate_score(obj["id"],
+                                            smoothed_distance, bbox_area, obj_name, center, frame.shape[1])
 
-                    if score > highest_score:  # serving the queue that will be read by the monitor thread
-                        highest_score = score
-                        most_relevant_obj = {
-                            "id": obj["id"],
-                            "name": obj_name,
-                            "distance": smoothed_distance,
-                            "cx": cx,
-                            "frame_shape": frame.shape,
-                            "score": score
-                        }
+                    # Store all info in a dict
+                    processed_objects.append({
+                        "id": obj["id"],
+                        "name": obj_name,
+                        "distance": smoothed_distance,
+                        "bbox": (x1, y1, x2, y2),
+                        "cx": cx,
+                        "score": score
+                    })
 
-                    # Draw bbox + distance
-                    cv2.rectangle(frame_out, (x1, y1),
-                                  (x2, y2), (0, 255, 0), 2)
-                    distance_text = f"{smoothed_distance:.2f}m" if smoothed_distance else "..."
-                    label = f"{obj_name} | {distance_text}"
+                most_relevant_obj = max(
+                    processed_objects, key=lambda o: o["score"], default=None)
+                most_relevant_obj["frame_shape"] = frame.shape
+
+                # Draw all objects
+                for obj in processed_objects:
+                    x1, y1, x2, y2 = obj["bbox"]
+                    is_most_relevant = obj["id"] == most_relevant_obj["id"]
+                    box_color = (0, 0, 255) if is_most_relevant else (
+                        255, 0, 0)
+                    distance_text = f"{obj['distance']:.2f}m"
+                    label = f"RELEVANT | {obj['name']} | {distance_text}" if is_most_relevant else f"{obj['name']} | {distance_text}"
+
+                    cv2.rectangle(frame_out, (x1, y1), (x2, y2), box_color, 2)
                     cv2.putText(frame_out, label, (x1, y1 - 8),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2)
 
-                # Push most relevant object to the queue
                 try:
                     relevant_obj_queue.put_nowait(most_relevant_obj)
 
