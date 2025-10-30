@@ -5,10 +5,9 @@ INSTALAR:
 - Termux app
 - Tailscale app
 
-No aplicativo IP Webcam, ativar ONVIF support, de forma que o servidor iniciado terá uma porta RTSP da seguinte forma: rtsp://<ip>:8080/h264_ulaw.sdp
+Instalar e abrir o aplicativo DroidCam no celular.
 
-Aqui, o IP deve ser aquele do celular no TailScale (o TailScale é necessário quando queremos usar 
-redes de internet diferentes, para conexão local o processo é mais simples). Note que também é necessário estar rodando o TailScale no computador, basta logar com a mesma conta e os IPs dos dispositivos serão visíveis.
+Instalar e abrir o TailScale no celular (o TailScale é necessário quando queremos usar redes de internet diferentes, para conexão local o processo é mais simples). Note que também é necessário estar rodando o TailScale no computador, basta logar com a mesma conta e os IPs dos dispositivos serão visíveis.
 
 Depois, para que o áudio rode no celular, precisamos do Termux, aplicação de terminal para o celular, onde iremos rodar o script `android_api.py`. Para isso, instalamos o Termux, depois instalamos python com `pkg install python` com o pacote `pip install flask` e `pkg install vlc` para que os áudios sejam repoduzidos.
 
