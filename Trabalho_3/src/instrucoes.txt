@@ -17,4 +17,17 @@ O setup final será da seguinte forma:
 - Execute o script `assist.py` após verificar que a constante IP_CELULAR_TAILSCALE está de acordo com o IP do seu celular no TailScale
 
 
+Comandos para rodar cliente.py:
+python src/cliente.py --ws-infer ws://20.246.42.175/ws/infer --ws-depth ws://20.246.42.175/ws/depth --tts --cooldown 5
 
+Comandos para rodar cliente_depth.py:
+python src/cliente_depth.py --ws-depth ws://20.246.42.175/ws/depth --camera 0 --width 640 --height 480 --jpeg 80 --max-fps 15 --show-depth
+
+
+Observações sobre profundidade (MiDaS):
+- MODELO PADRÃO: MiDaS_small (manter por enquanto)
+- Não é necessário passar nada no cliente; o servidor usa MiDaS_small por padrão.
+- Se quiser testar outro modelo no futuro, adicione flags (opcional):
+  - cliente.py:    --depth-model DPT_Hybrid --temporal-filter exponential
+  - cliente_depth.py: --depth-model DPT_Hybrid --temporal-filter exponential --show-depth
+  (Modelos suportados: MiDaS_small, DPT_Hybrid, DPT_Large)
