@@ -7,12 +7,13 @@
 #
 # ============================================================================
 
-# PyTorch com CUDA (usar index-url específica)
---index-url https://download.pytorch.org/whl/cu118
+# PyTorch com CUDA (substituir por index-url específica - detalhes no README)
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.5.1
 torchvision==0.20.1
 
 # Deep Learning e Modelos
+--trusted-host pypi.org
 ultralytics>=8.0.0
 timm>=1.0.0
 
@@ -23,6 +24,7 @@ pillow>=10.0.0
 
 # Text-to-Speech
 pyttsx3>=2.90
+piper-tts>=1.2.0
 
 # Utilitários
 matplotlib>=3.8.0
