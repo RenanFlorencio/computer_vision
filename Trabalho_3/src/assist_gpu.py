@@ -198,7 +198,9 @@ if __name__ == "__main__":
             frame_out = frame.copy()
 
             # --- Detection every N frames ---
+            st = time.time()
             tracked_objects = detector.detect_and_track(frame)
+            print(f"Detection+Tracking time: {time.time() - st:.3f}s")
 
             # --- Process tracked objects ---
             if tracked_objects and depth_map is not None:
