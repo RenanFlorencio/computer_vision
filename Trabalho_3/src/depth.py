@@ -17,10 +17,11 @@ os.environ['GDK_BACKEND'] = 'x11'
 class DepthEstimator:
     """Estimador com filtros de estabilização"""
 
-    def __init__(self, model='MiDaS_small', device='cuda',
-                 calibration_file=None, temporal_filter='exponential'):
+    def __init__(self, model='DPT_Large', device='cuda',
+            calibration_file=None, temporal_filter='exponential'):
         """
         Args:
+            model: 'DPT_Hybrid', 'DPT_Large', 'MiDaS'
             temporal_filter: 'none', 'mean', 'median', 'exponential'
         """
         self.device = device if torch.cuda.is_available() else 'cpu'
@@ -29,16 +30,75 @@ class DepthEstimator:
         print(f"🌊 Carregando {model}...")
         print(f"   Device: {self.device.upper()}")
 
-        self.model = torch.hub.load("intel-isl/MiDaS", model, verbose=False)
+         # Carregar modelo específico
+        if model.startswith('zoedepth'):
+            # Verificar se modelo local existe
+            local_model_path = Path("./modelos_pesos/zoedepth/zoedepth_n.pt")
+            
+            if local_model_path.exists():
+                print(f"   🎯 Tentando usar modelo local: {local_model_path}")
+                try:
+                    # Primeiro carregar a arquitetura do modelo
+                    print("   📥 Carregando arquitetura...")
+                    if model == 'zoedepth_n':
+                        self.model = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=False)
+                    else:
+                        # Para outros modelos zoedepth
+                        model_variant = model.replace('zoedepth_', 'ZoeD_').upper()
+                        self.model = torch.hub.load("isl-org/ZoeDepth", model_variant, pretrained=False)
+                    
+                    # Agora carregar os pesos locais
+                    print("   💾 Carregando pesos locais...")
+                    state_dict = torch.load(local_model_path, map_location=self.device, weights_only=False)
+                    self.model.load_state_dict(state_dict, strict=False)  # strict=False para ignorar chaves incompatíveis
+                    print("   ✅ Modelo local carregado com sucesso!")
+                    
+                except Exception as e:
+                    print(f"   ⚠️  Erro ao carregar modelo local: {e}")
+                    print("   🔄 Fallback: carregando do Torch Hub...")
+                    if model == 'zoedepth_n':
+                        self.model = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+                    else:
+                        model_variant = model.replace('zoedepth_', 'ZoeD_').upper()
+                        self.model = torch.hub.load("isl-org/ZoeDepth", model_variant, pretrained=True)
+            else:
+                print(f"   📦 Modelo local não encontrado, baixando do Torch Hub...")
+                if model == 'zoedepth_n':
+                    self.model = torch.hub.load("isl-org/ZoeDepth", "ZoeD_N", pretrained=True)
+                else:
+                    model_variant = model.replace('zoedepth_', 'ZoeD_').upper()
+                    self.model = torch.hub.load("isl-org/ZoeDepth", model_variant, pretrained=True)
+            
+            # Transform para ZoeDepth - criar manualmente
+            try:
+                # Tentar usar transforms do ZoeDepth se disponível
+                self.transform = torch.hub.load("isl-org/ZoeDepth", "transforms").default_transform
+            except:
+                # Fallback: usar transform manual do ZoeDepth
+                print("   📐 Criando transform ZoeDepth manualmente...")
+                import torchvision.transforms as T
+                self.transform = T.Compose([
+                    T.ToPILImage(),
+                    T.Resize((384, 512)),  # ZoeDepth padrão
+                    T.ToTensor(),
+                    T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+                ])
+            
+        elif model in ['DPT_Hybrid', 'DPT_Large']:
+            self.model = torch.hub.load("intel-isl/MiDaS", model, verbose=False)
+            midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", verbose=False)
+            self.transform = midas_transforms.dpt_transform
+        elif model == 'MiDaS':
+            self.model = torch.hub.load("intel-isl/MiDaS", "MiDaS", verbose=False)
+            midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", verbose=False)
+            self.transform = midas_transforms.default_transform
+        else:  # MiDaS_small
+            self.model = torch.hub.load("intel-isl/MiDaS", model, verbose=False)
+            midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms", verbose=False)
+            self.transform = midas_transforms.small_transform
+
         self.model.to(self.device)
         self.model.eval()
-
-        midas_transforms = torch.hub.load(
-            "intel-isl/MiDaS", "transforms", verbose=False)
-        if 'small' in model.lower():
-            self.transform = midas_transforms.small_transform
-        else:
-            self.transform = midas_transforms.dpt_transform
 
         print(f"✓ Depth estimator pronto")
 
@@ -50,7 +110,7 @@ class DepthEstimator:
         self.use_interpolation = False
 
         if calibration_file is None:
-            self.calibration_file = Path(__file__).parent / 'calibration.json'
+            self.calibration_file = Path(__file__).parent / f'calibration_{model}.json'
         else:
             self.calibration_file = Path(calibration_file)
 
@@ -101,6 +161,7 @@ class DepthEstimator:
             self.inference_times.pop(0)
 
         return depth_map
+
 
     def _apply_temporal_filter(self, depth_map):
         """Aplicar filtro temporal escolhido"""
@@ -287,15 +348,20 @@ if __name__ == "__main__":
     print("DEPTH ESTIMATOR - VERSÃO COM FILTROS")
     print("="*70)
 
+    MODELO_PROFUNDIDADE = 'DPT_Hybrid'
+    IP_CELULAR_TAILSCALE = "100.79.114.120" # Igor
+    PORTA_DROIDCAM = "4747"
+
     try:
         # Inicializar com filtro exponencial
-        estimator = DepthEstimator(temporal_filter='exponential')
+        estimator = DepthEstimator(model=MODELO_PROFUNDIDADE, temporal_filter='exponential')
         estimator.alpha = 0.35  # Ajustar suavização (0.2-0.6)
 
-        # phone_url = "rtsp://100.118.7.80:8080/h264_ulaw.sdp"
-        # cap = cv2.VideoCapture(phone_url)
+        # Captura de vídeo (câmera ou stream)
+        video_url = f"http://{IP_CELULAR_TAILSCALE}:{PORTA_DROIDCAM}/video"
+        cap = cv2.VideoCapture(video_url)
 
-        cap = cv2.VideoCapture(0)
+        # cap = cv2.VideoCapture(0)
 
         if not cap.isOpened():
             print("❌ Câmera indisponível")
@@ -308,7 +374,7 @@ if __name__ == "__main__":
             print("\n⚠️  Sem calibração - valores aproximados")
 
         print("\n📝 CONTROLES:")
-        print("   1, 2, 3 = Calibrar (0.5m, 1.0m, 2.0m)")
+        print("   1 ... 9 = Calibrar (0.25m, 0.5m, 0.75m, 1.0m, 1.5m, 1.75m, 2.0m, 2.5m, 3.0m)")
         print("   S       = Salvar calibração")
         print("   R       = Reset/Recalibrar")
         print("   +/-     = Ajustar filtro (mais/menos suavização)")
@@ -362,6 +428,13 @@ if __name__ == "__main__":
             cv2.line(frame, (center[0], center[1]-40),
                      (center[0], center[1]+40), (0, 255, 0), 3)
 
+            # Mira central no mapa de profundidade (linha mais fina)
+            cv2.circle(depth_vis, center, 30, (0, 255, 0), 1)
+            cv2.line(depth_vis, (center[0]-40, center[1]),
+                     (center[0]+40, center[1]), (0, 255, 0), 1)
+            cv2.line(depth_vis, (center[0], center[1]-40),
+                     (center[0], center[1]+40), (0, 255, 0), 1)
+
             # Status calibração
             if estimator.use_interpolation:
                 status = "CALIBRADO"
@@ -391,8 +464,10 @@ if __name__ == "__main__":
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
             # Instruções
-            cv2.putText(frame, "1/2/3=Cal | S=Save | +/-=Filtro | ESC=Sair",
+            cv2.putText(frame, "1...9=Cal | S=Save | +/-=Filtro | ESC=Sair",
                         (10, h-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            cv2.putText(frame, "1 - 0.25m | 2 - 0.5m | 3 - 0.75m | 4 - 1.0m | 5 - 1.5m | 6 - 1.75m | 7 - 2.0m | 8 - 2.5m | 9 - 3.0m",
+                        (10, h-30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
             # Combinar
             combined = np.hstack([frame, depth_vis])
@@ -404,14 +479,32 @@ if __name__ == "__main__":
             if key == 27:  # ESC
                 break
             elif key == ord('1'):
+                print(f"\n📍 Calibrando 0.25m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 0.25)
+            elif key == ord('2'):
                 print(f"\n📍 Calibrando 0.5m (raw: {avg_raw:.4f})")
                 estimator.add_calibration_point(avg_raw, 0.5)
-            elif key == ord('2'):
+            elif key == ord('3'):
+                print(f"\n📍 Calibrando 0.75m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 0.75)
+            elif key == ord('4'):
                 print(f"\n📍 Calibrando 1.0m (raw: {avg_raw:.4f})")
                 estimator.add_calibration_point(avg_raw, 1.0)
-            elif key == ord('3'):
+            elif key == ord('5'):
+                print(f"\n📍 Calibrando 1.5m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 1.5)
+            elif key == ord('6'):
+                print(f"\n📍 Calibrando 1.75m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 1.75)
+            elif key == ord('7'):
                 print(f"\n📍 Calibrando 2.0m (raw: {avg_raw:.4f})")
                 estimator.add_calibration_point(avg_raw, 2.0)
+            elif key == ord('8'):
+                print(f"\n📍 Calibrando 2.5m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 2.5)
+            elif key == ord('9'):
+                print(f"\n📍 Calibrando 3.0m (raw: {avg_raw:.4f})")
+                estimator.add_calibration_point(avg_raw, 3.0)
             elif key == ord('s') or key == ord('S'):
                 if estimator.save_calibration():
                     print("✅ Calibração salva!")

@@ -16,8 +16,11 @@ TARGET_FPS = 30
 FRAME_DURATION = 1.0 / TARGET_FPS
 DEPTH_SMOOTH_WINDOW = 10         # number of frames for depth smoothing
 SCORE_WINDOW = 10                # number of frames for score smoothing
-IP_CELULAR_TAILSCALE = "100.118.7.80"
+# IP_CELULAR_TAILSCALE = "100.118.7.80" #Renan
+IP_CELULAR_TAILSCALE = "100.79.114.120" # Igor
 PORTA_DROIDCAM = "4747"
+
+MODELO_PROFUNDIDADE = 'DPT_Hybrid'  # 'DPT_Hybrid', 'DPT_Large', 'MiDaS', 'depth_anything_v2_vits', 'depth_anything_v2_vitb', 'depth_anything_v2_vitl'
 
 # --- SHARED DATA ---
 frame_queue = queue.Queue(maxsize=1)
@@ -142,7 +145,7 @@ if __name__ == "__main__":
 
     try:
         detector = ObjectDetector()
-        estimator = DepthEstimator(temporal_filter='exponential')
+        estimator = DepthEstimator(temporal_filter='exponential', model = MODELO_PROFUNDIDADE)
         estimator.alpha = 0.35
 
         # RTSP URL from IP Webcam app
@@ -208,8 +211,14 @@ if __name__ == "__main__":
                     cx, cy = obj['center']
                     obj_name = obj['name_pt']
 
-                    distance = estimator.get_distance_at_point(
-                        depth_map, cx, cy, use_buffer=True)
+                    # distance = estimator.get_distance_at_point(
+                    #     depth_map, cx, cy, use_buffer=True)
+
+                    bbox_int = (int(x1), int(y1), int(x2), int(y2))
+
+                    distance = estimator.get_distance_roi(
+                        depth_map, bbox_int)
+
                     if distance is None:
                         continue
 
