@@ -2,17 +2,36 @@ import cv2
 import numpy as np
 import os
 import time
+import sys
 from detector import ObjectDetector
 from depth import DepthEstimator
 from tts import tts
 import requests
 from threading import Thread, Lock
 import queue
+import logging
+from pathlib import Path
 
 # --- CONFIGURATION ---
 DETECTION_INTERVAL = 10          # Run YOLO every N frames
 TTS_COOLDOWN_TIME = 5           # seconds between TTS warnings
 TARGET_FPS = 30
+
+# Criar pasta de logs se não existir
+log_dir = Path(__file__).parent / 'logs'
+log_dir.mkdir(exist_ok=True)
+# Nome do arquivo com timestamp
+log_file = log_dir / f'navigation_{time.strftime("%Y%m%d_%H%M%S")}.log'
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file),  # Log para arquivo
+        logging.StreamHandler(sys.stdout)              # Log para console também
+    ]
+)
+
 FRAME_DURATION = 1.0 / TARGET_FPS
 DEPTH_SMOOTH_WINDOW = 10         # number of frames for depth smoothing
 SCORE_WINDOW = 10                # number of frames for score smoothing
@@ -21,6 +40,7 @@ IP_CELULAR_TAILSCALE = "100.79.114.120" # Igor
 PORTA_DROIDCAM = "4747"
 
 MODELO_PROFUNDIDADE = 'DPT_Hybrid'  # 'DPT_Hybrid', 'DPT_Large', 'MiDaS', 'depth_anything_v2_vits', 'depth_anything_v2_vitb', 'depth_anything_v2_vitl'
+logging.info(f"Using depth model: {MODELO_PROFUNDIDADE}")
 
 # --- SHARED DATA ---
 frame_queue = queue.Queue(maxsize=1)
@@ -47,7 +67,9 @@ def depth_worker(estimator, frame_queue):
     while True:
         frame = frame_queue.get()
         if frame is not None:
+            st = time.time()
             depth_map = estimator.estimate(frame)
+            logging.info(f"Depth estimation time: {time.time() - st:.5f}s")
         frame_queue.task_done()
 
 
@@ -79,11 +101,15 @@ def relevance_monitor():
                 pos = "direita" if cx > w * 0.66 else "esquerda" if cx < w * 0.33 else "frente"
                 proximity = "perto" if obj["distance"] < 1.5 else "longe" if obj["distance"] < 2.5 else "distante"
 
+                logging.info(f"Warning most relevant object: {obj['name']} at "
+                             f"{obj['distance']: .2f}m (score: {highest_score: .2f})")
+                st = time.time()
                 make_warning_phone(
                     obj["distance"], obj["name"], pos, proximity)
                 last_warned_object_id = obj["id"]
                 last_warned_score = highest_score
                 last_warning_time = time.time()
+                logging.info(f"TTS generation and sending time: {time.time() - st:.5f}s")
 
 
 def frame_reader(cap, latest_frame):
@@ -200,7 +226,8 @@ if __name__ == "__main__":
             # --- Detection every N frames ---
             st = time.time()
             tracked_objects = detector.detect_and_track(frame)
-            print(f"Detection+Tracking time: {time.time() - st:.3f}s")
+            logging.info(f"Detection+Tracking time: {time.time() - st:.5f}s")
+
 
             # --- Process tracked objects ---
             if tracked_objects and depth_map is not None:
