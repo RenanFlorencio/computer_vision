@@ -319,6 +319,8 @@ if __name__ == "__main__":
         reader_thread.join()
         monitor_thread.join()
         depth_thread.join()
+        
+        exit(0)
 
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
