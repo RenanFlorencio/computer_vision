@@ -69,54 +69,115 @@ def depth_worker(estimator, frame_queue):
         frame_queue.task_done()
 
 def relevance_monitor():
-    """Thread that continuously checks for the most relevant object and saves warning frames."""
+    """Thread that continuously checks for the most relevant object and decides which warning to emit."""
     global last_warned_object_id, last_warned_score, last_warning_time
 
     warnings_dir = os.path.join(os.path.dirname(__file__), "warnings")
     os.makedirs(warnings_dir, exist_ok=True)
 
+    # thresholds
+    NEAR = 1.5
+    MID = 2.5
+
+    # fallback width if frame_shape missing
+    FALLBACK_FRAME_WIDTH = 480
+
     while True:
         try:
-            obj = relevant_obj_queue.get(timeout=1)
+            objs = relevant_obj_queue.get(timeout=1)  # agora recebo lista de objs
         except queue.Empty:
             continue
 
-        if obj is None:
+        if objs is None:
             break
 
-        highest_score = obj["score"]
+        if not isinstance(objs, (list, tuple)) or len(objs) == 0:
+            # nada para processar
+            continue
 
-        if (time.time() - last_warning_time > TTS_COOLDOWN_TIME):
-            if (last_warned_object_id != obj["id"] or
-                    highest_score > last_warned_score * 1.2):
+        # tenta obter largura do frame a partir de qualquer objeto que tenha frame_shape
+        frame_w = None
+        for o in objs:
+            fs = o.get("frame_shape")
+            if fs and len(fs) >= 2:
+                frame_w = fs[1]
+                break
+        if frame_w is None:
+            frame_w = FALLBACK_FRAME_WIDTH
 
-                print(f"Warning most relevant object: {obj['name']} at "
-                      f"{obj['distance']:.2f}m (score: {highest_score:.2f})")
+        # ============================== ANALISE GLOBAL ==============================
+        any_near = any(o.get("distance", float('inf')) < NEAR for o in objs)
 
-                # --- 🔸 SALVAR FRAME COM BOUNDING BOXES ---
-                with latest_display_frame["lock"]:
-                    display_frame = (latest_display_frame["frame"].copy()
-                                     if latest_display_frame["frame"] is not None else None)
+        # regiões (usa frame_w)
+        left_objs = [o for o in objs if o.get("cx", 0) < frame_w * 0.33]
+        right_objs = [o for o in objs if o.get("cx", 0) > frame_w * 0.66]
+        front_objs = [o for o in objs if (o not in left_objs and o not in right_objs)]
 
-                if display_frame is not None:
-                    timestamp = time.strftime("%Y%m%d-%H%M%S")
-                    safe_name = obj['name'].replace(" ", "_")
-                    filename = f"warning_{safe_name}_{obj['distance']:.2f}m_{timestamp}.jpg"
-                    filepath = os.path.join(warnings_dir, filename)
-                    cv2.imwrite(filepath, display_frame)
-                    print(f"✅ Frame salvo (com bounding boxes): {filepath}")
+        # considera "perto" ou "a distância média" usando MID threshold para as regras de virar
+        near_left = any(o.get("distance", float('inf')) < MID for o in left_objs)
+        near_right = any(o.get("distance", float('inf')) < MID for o in right_objs)
+        near_front = any(o.get("distance", float('inf')) < MID for o in front_objs)
 
-                # --- Direção e proximidade ---
-                h, w, _ = obj["frame_shape"]
-                cx = obj["cx"]
-                pos = "direita" if cx > w * 0.66 else "esquerda" if cx < w * 0.33 else "frente"
-                proximity = "perto" if obj["distance"] < 1.5 else "a distância média" if obj["distance"] < 2.5 else "distante"
+        # ============================== HIERARQUIA ==============================
+        # Prioridade rígida: pare -> vire -> siga -> identificação
 
-                make_warning_phone(obj["distance"], obj["name"], pos, proximity)
-
-                last_warned_object_id = obj["id"]
-                last_warned_score = highest_score
+        # --- 1) PARE: se qualquer objeto está perto (NEAR)
+        if any_near:
+            if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+                audio_path = os.path.join(os.path.dirname(__file__), "tts/audios/pare.wav")
+                if not os.path.exists(audio_path):
+                    tts.synthesize_speech("pare", audio_path)
+                with open(audio_path, "rb") as f:
+                    requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio", files={"audio": f})
                 last_warning_time = time.time()
+
+            # após emitir "pare" não emite outros avisos agora
+            continue
+
+        # --- 2) vire a esquerda: há objeto a distância média ou perto à frente e à direita
+        if near_front and near_right:
+            if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+                audio_path = os.path.join(os.path.dirname(__file__), "tts/audios/vire_esquerda.wav")
+                if not os.path.exists(audio_path):
+                    tts.synthesize_speech("vire a esquerda", audio_path)
+                with open(audio_path, "rb") as f:
+                    requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio", files={"audio": f})
+                last_warning_time = time.time()
+            continue
+
+        # --- 3) vire a direita: há objeto a distância média ou perto à frente e à esquerda
+        if near_front and near_left:
+            if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+                audio_path = os.path.join(os.path.dirname(__file__), "tts/audios/vire_direita.wav")
+                if not os.path.exists(audio_path):
+                    tts.synthesize_speech("vire a direita", audio_path)
+                with open(audio_path, "rb") as f:
+                    requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio", files={"audio": f})
+                last_warning_time = time.time()
+            continue
+
+        # --- 4) siga em frente: campo livre (nenhum objeto com distância < MID)
+        if not any(o.get("distance", float('inf')) < MID for o in objs):
+            if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+                audio_path = os.path.join(os.path.dirname(__file__), "tts/audios/siga_em_frente.wav")
+                if not os.path.exists(audio_path):
+                    tts.synthesize_speech("siga em frente", audio_path)
+                with open(audio_path, "rb") as f:
+                    requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio", files={"audio": f})
+                last_warning_time = time.time()
+            continue
+
+        # --- 5) fallback: aviso identificando o objeto mais relevante (se nada mais foi emitido)
+        best = max(objs, key=lambda o: o.get("score", -float('inf')))
+        if time.time() - last_warning_time > TTS_COOLDOWN_TIME:
+            h_w = best.get("frame_shape", (0, frame_w))
+            h, w = h_w[0], h_w[1] if len(h_w) >= 2 else (0, frame_w)
+            cx = best.get("cx", 0)
+            pos = "direita" if cx > w * 0.66 else "esquerda" if cx < w * 0.33 else "frente"
+            proximity = "perto" if best.get("distance", float('inf')) < NEAR else \
+                        "a distância média" if best.get("distance", float('inf')) < MID else "distante"
+            make_warning_phone(best.get("distance", 0.0), best.get("name", "objeto"), pos, proximity)
+            last_warning_time = time.time()
 
 def frame_reader(cap, latest_frame):
     """Continuously read frames from the capture device, resize them, and store the most recent one."""
@@ -290,7 +351,8 @@ if __name__ == "__main__":
                         "distance": smoothed_distance,
                         "bbox": (x1, y1, x2, y2),
                         "cx": cx,
-                        "score": score
+                        "score": score,
+                        "frame_shape": frame.shape
                     })
 
                 most_relevant_obj = max(
@@ -311,7 +373,7 @@ if __name__ == "__main__":
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, box_color, 2)
 
                 try:
-                    relevant_obj_queue.put_nowait(most_relevant_obj)
+                    relevant_obj_queue.put_nowait(processed_objects)
 
                 except queue.Full:  # Replace the old object if the queue is full
                     relevant_obj_queue.get_nowait()
