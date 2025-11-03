@@ -219,6 +219,31 @@ def make_warning_phone(distance, obj_name, position, proximity):
         requests.post(f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio",
                       files={"audio": f})
 
+def make_warning_phone_nav(warning_type: str):
+    """
+    Emite aviso de navegação simples (ex.: "pare", "siga em frente").
+    O arquivo de áudio é gerado com TTS apenas se não existir.
+    """
+    import os
+    import requests
+
+    audio_dir = os.path.join(os.path.dirname(__file__), "tts/audios")
+    os.makedirs(audio_dir, exist_ok=True)
+
+    # Substitui espaços por underscore para o nome do arquivo
+    audio_file_name = f"{warning_type.replace(' ', '_')}.wav"
+    audio_path = os.path.join(audio_dir, audio_file_name)
+
+    # Gera áudio com TTS apenas se ainda não existir
+    if not os.path.exists(audio_path):
+        tts.synthesize_speech(warning_type, audio_path)
+
+    # Envia para tocar no celular via HTTP
+    with open(audio_path, "rb") as f:
+        requests.post(
+            f"http://{IP_CELULAR_TAILSCALE}:5000/play_audio",
+            files={"audio": f}
+        )
 
 def calculate_score(obj_id, distance, bbox_area, object_name, center, frame_width):
     """Calculate relevance score."""
